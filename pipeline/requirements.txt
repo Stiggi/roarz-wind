@@ -1,0 +1,7 @@
+# Data pipeline for the wind layer (pipeline/icon_wind.py), installed by .github/workflows/wind.yml and ci.yml (Python 3.13).
+# eccodes ships binary wheels incl. the ecCodes library with CCSDS (libaec) support – no apt packages needed.
+eccodes==2.49.0
+eccodeslib==2.49.0.30
+findlibs==0.1.3
+numpy==2.5.4
+pillow==12.3.0

@@ -1,0 +1,3 @@
+# Local test runs (python pipeline/icon_wind.py --out build/wind)
+/build/
+__pycache__/

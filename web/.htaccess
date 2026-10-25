@@ -1,0 +1,28 @@
+# Web folder of https://wind.roarz.net/ – uploaded by .github/scripts/ftp-wind.sh with every published run.
+# Layout: latest.json → <run>/meta.json, <run>/map/*.png, <run>/tiles/<id>/*.png. A run folder never changes
+# after latest.json points to it, so its files are immutable.
+
+Options -Indexes
+
+<IfModule mod_mime.c>
+  AddType application/json .json
+  AddType image/png .png
+</IfModule>
+
+<IfModule mod_headers.c>
+  # The app (www.roarz.net, dev.roarz.net) reads the data from this host; the data is public, so any origin may read it.
+  Header always set Access-Control-Allow-Origin "*"
+  Header always set X-Content-Type-Options "nosniff"
+
+  <FilesMatch "\.png$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <FilesMatch "\.json$">
+    Header set Cache-Control "public, max-age=300"
+  </FilesMatch>
+</IfModule>
+
+# Leftovers of an interrupted switch of latest.json are never served.
+<FilesMatch "\.(tmp|old)$">
+  Require all denied
+</FilesMatch>

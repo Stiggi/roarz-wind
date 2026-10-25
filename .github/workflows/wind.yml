@@ -1,0 +1,92 @@
+# Wind data for the roarz map layer: DWD ICON-EU → PNG textures → https://wind.roarz.net/ (own subdomain and folder
+# on the webspace, own FTP account).
+#
+# Runs ONCE for both app environments: www.roarz.net and dev.roarz.net read the same data (CORS). This repository is
+# public, so GitHub-hosted runners cost no Actions minutes; the app itself lives in a private repository.
+#
+# Steps: fetch the published latest.json → pipeline/icon_wind.py picks the newest COMPLETE run (all variables,
+# steps 0–48) and only builds it if it is newer → .github/scripts/ftp-wind.sh uploads web/.htaccess and the run
+# folder, verifies it, switches latest.json last and deletes all but the last two runs. Any failure leaves the published data as
+# it is (the job fails loudly).
+#
+# Only schedule and workflow_dispatch – never pull_request: the job holds the FTP secrets.
+#
+# Environment "live" (restricted to the branch main):
+#   Secrets    FTP_HOST, FTP_USER, FTP_PASSWORD – the FTP account of the subdomain (it reaches only its folder).
+#   Variables  optional, only if the account does not start in the web folder of wind.roarz.net:
+#              FTP_PATH  folder the FTP account starts in (default "/")
+#              WIND_DIR  web folder of wind.roarz.net relative to FTP_PATH (default ".")
+# First run: Actions → "Wind data" → "Run workflow" (branch main).
+
+name: Wind data
+
+on:
+  schedule:
+    # Hourly, although DWD publishes a run every 3 h: GitHub sometimes drops scheduled runs, and a run is picked up
+    # within the hour once all its files are there. Without a newer run the job ends after reading latest.json.
+    - cron: '20 * * * *'
+  workflow_dispatch:
+    inputs:
+      run:
+        description: 'Model run YYYYMMDDHH (empty = newest complete run)'
+        required: false
+        default: ''
+
+concurrency:
+  group: wind-data
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write # keep-alive below
+
+jobs:
+  wind:
+    runs-on: ubuntu-24.04
+    environment: live
+    timeout-minutes: 60
+    env:
+      FTP_HOST: ${{ secrets.FTP_HOST }}
+      FTP_USER: ${{ secrets.FTP_USER }}
+      FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+      FTP_PATH: ${{ vars.FTP_PATH || '/' }}
+      WIND_DIR: ${{ vars.WIND_DIR || '.' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Keep-alive
+        # GitHub disables scheduled workflows of public repositories after 60 days without activity. Re-enabling
+        # the (enabled) workflow counts as activity; a failure here never fails the job.
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/wind.yml/enable"
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Abhängigkeiten installieren
+        run: |
+          pip install -q -r pipeline/requirements.txt
+          python -c "import eccodes; print('ecCodes', eccodes.codes_get_api_version())"
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp > /dev/null
+
+      - name: Veröffentlichten Stand holen
+        run: .github/scripts/ftp-wind.sh fetch build/published-latest.json
+
+      - name: ICON-EU laden und kodieren
+        id: build
+        env:
+          RUN: ${{ inputs.run }}
+        run: |
+          args=(--out build/wind --published build/published-latest.json)
+          [ -n "$RUN" ] && args+=(--run "$RUN")
+          python pipeline/icon_wind.py "${args[@]}"
+
+      - name: Hochladen und umschalten
+        if: steps.build.outputs.run != ''
+        run: .github/scripts/ftp-wind.sh publish build/wind
