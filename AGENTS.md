@@ -35,7 +35,9 @@ dorthin zeigt; die App nutzt die Subdomain nicht).
 - `pipeline/icon_wind.py` verarbeitet nur einen Lauf, dessen Dateien für **alle** Variablen und Schritte 000–048
   vorhanden sind, und nur wenn er neuer ist als der veröffentlichte. Fehler → Abbruch vor `latest.json`.
 - `.github/scripts/ftp-wind.sh`: Laufordner hochladen → Vollständigkeit prüfen → `latest.json` zuletzt umschalten →
-  alle Läufe außer dem neuen und dem vorherigen löschen. Die `.htaccess` des Ordners (CORS, Cache-Header) gehört der
+  alle Läufe außer dem neuen und dem vorherigen löschen. Das Löschen erledigt der Server (`POST` auf den Endpunkt der
+  App, `WIND_CLEANUP_URL`/Secret `WIND_CLEANUP_TOKEN`, Header `X-Wind-Token`; den Token nie ausgeben); nur wenn das
+  fehlschlägt, wird per FTP gelöscht. Die `.htaccess` des Ordners (CORS, Cache-Header) gehört der
   App und wird nie angefasst. Verbindung/Settings in `ftp-common.sh` (Kopie aus roarz).
 - Kodierung (Wertebereiche, Kacheln, `meta.json`) siehe Kopf von `pipeline/icon_wind.py` und README. Die App dekodiert
   sie in `public/js/wind/grid.js` (roarz) – Formatänderungen nur abgestimmt mit der App und rückwärtskompatibel

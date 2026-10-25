@@ -10,12 +10,16 @@
 #   1. mirror <dir>/<run>/ to <WIND_DIR>/<run>/ (a new folder: no client reads it yet)
 #   2. compare the remote file list of that folder with the local one – any difference aborts
 #   3. upload latest.json as latest.json.tmp and rename it to latest.json (the switch)
-#   4. delete run folders other than the new run and the previous one (still used by open apps)
+#   4. delete run folders other than the new run and the previous one (still used by open apps): on the server by the
+#      app (POST WIND_CLEANUP_URL, seconds); over FTP (one request per file, ~13 min per run) only if that is not
+#      configured or fails
 #
 # Env: FTP_HOST, FTP_USER, FTP_PASSWORD, FTP_PATH (see ftp-common.sh); WIND_DIR (the wind folder relative to FTP_PATH,
 # default "." = the FTP account's root is that folder). The folder's .htaccess (CORS, cache headers) belongs to the
-# app repository and is deployed from there; this script never touches it. Testing: DRY_RUN=1 prints the lftp commands;
-# DRY_RUN_REMOTE_LIST=<file> fakes the remote listing of step 2, DRY_RUN_REMOTE_DIRS=<file> the run folders for step 4.
+# app repository and is deployed from there; this script never touches it. WIND_CLEANUP_URL, WIND_CLEANUP_TOKEN: the
+# app's cleanup endpoint (roarz: public/_deploy/wind-cleanup.php) and its token (header X-Wind-Token).
+# Testing: DRY_RUN=1 prints the lftp commands; DRY_RUN_REMOTE_LIST=<file> fakes the remote listing of step 2,
+# DRY_RUN_REMOTE_DIRS=<file> the run folders for step 4, DRY_RUN_CLEANUP=ok|fail the answer of the cleanup endpoint.
 set -euo pipefail
 
 . "$(dirname "$0")/ftp-common.sh"
@@ -37,6 +41,23 @@ lftp_out() {
     return 0
   fi
   lftp_run "$file"
+}
+
+# Step 4 on the server: the app deletes the old run folders. Non-zero if not configured or the call fails.
+server_cleanup() {
+  [ -n "${WIND_CLEANUP_URL:-}" ] && [ -n "${WIND_CLEANUP_TOKEN:-}" ] || return 1
+  if [ "${DRY_RUN:-}" = 1 ]; then
+    echo "POST $WIND_CLEANUP_URL" >&2
+    [ "${DRY_RUN_CLEANUP:-ok}" = ok ]
+    return
+  fi
+  local out
+  if out=$(curl --fail-with-body -sS --max-time 120 -X POST -H "X-Wind-Token: $WIND_CLEANUP_TOKEN" "$WIND_CLEANUP_URL" 2>&1); then
+    echo "Server cleanup: $out"
+  else
+    echo "::warning::Server cleanup failed ($out) – deleting old runs over FTP." >&2
+    return 1
+  fi
 }
 
 case "$cmd" in
@@ -101,20 +122,22 @@ publish)
   lftp_run "$work/switch.lftp"
   echo "latest.json → $run"
 
-  # 4. Delete old run folders (only folders named like a run; .htaccess and latest.json stay).
-  { settings; echo "cd \"$WIND_DIR\""; echo "cls -1"; } > "$work/dirs.lftp"
-  lftp_out "$work/dirs.lftp" "${DRY_RUN_REMOTE_DIRS:-}" | sed 's|/$||' | grep -E '^[0-9]{10}$' > "$work/dirs" || true
-  {
-    settings
-    echo "set cmd:fail-exit no"
-    while IFS= read -r d; do
-      if [ "$d" != "$run" ] && [ "$d" != "$previous" ]; then
-        echo "rm -r -f \"$WIND_DIR/$d\""
-        echo "Deleting old run $d" >&2
-      fi
-    done < "$work/dirs"
-  } > "$work/cleanup.lftp"
-  lftp_run "$work/cleanup.lftp"
+  # 4. Delete old run folders (only folders named like a run; .htaccess and latest.json stay) – on the server if possible.
+  if ! server_cleanup; then
+    { settings; echo "cd \"$WIND_DIR\""; echo "cls -1"; } > "$work/dirs.lftp"
+    lftp_out "$work/dirs.lftp" "${DRY_RUN_REMOTE_DIRS:-}" | sed 's|/$||' | grep -E '^[0-9]{10}$' > "$work/dirs" || true
+    {
+      settings
+      echo "set cmd:fail-exit no"
+      while IFS= read -r d; do
+        if [ "$d" != "$run" ] && [ "$d" != "$previous" ]; then
+          echo "rm -r -f \"$WIND_DIR/$d\""
+          echo "Deleting old run $d" >&2
+        fi
+      done < "$work/dirs"
+    } > "$work/cleanup.lftp"
+    lftp_run "$work/cleanup.lftp"
+  fi
   echo "Done in $(( $(date +%s) - start )) s (kept: $run${previous:+, $previous})."
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "- Uploaded: $count files, $((bytes / 1000000)) MB in $(( $(date +%s) - start )) s" >> "$GITHUB_STEP_SUMMARY"

@@ -24,7 +24,9 @@ FTP secrets of the environment `live`:
      `latest.json`.
 3. `.github/scripts/ftp-wind.sh publish` uploads the run folder (lftp mirror, 8 parallel connections), checks that
    every file arrived, then switches `latest.json` and deletes all run folders but the new and the previous one. The
-   folder's `.htaccess` (CORS, cache headers) is deployed by the app and never touched here.
+   deletion runs on the server: `POST https://www.roarz.net/_deploy/wind-cleanup.php` with the header `X-Wind-Token`
+   (the app's endpoint, seconds instead of ~13 minutes over FTP); only if that fails are the folders deleted over FTP.
+   The folder's `.htaccess` (CORS, cache headers) is deployed by the app and never touched here.
 
 Any error (missing file, decoding, upload) fails the job and leaves the published data untouched. Per run: about
 6,000 files and 110 MB; on the server at most three runs at a time. The job summary logs the volume, file count and
@@ -40,6 +42,8 @@ Environment `live` (Settings → Environments), deployment branches: `main` only
 | `FTP_HOST`, `FTP_USER`, `FTP_PASSWORD` | secrets | FTP account that reaches only `public/wind/` (at webgo bound to the subdomain wind.roarz.net, which points there) |
 | `FTP_PATH` | variable, optional | folder the account starts in (default `/`) |
 | `WIND_DIR` | variable, optional | wind folder relative to `FTP_PATH` (default `.`) |
+| `WIND_CLEANUP_TOKEN` | secret | same value as in the environment `live` of the app repository (deletes old runs on the server) |
+| `WIND_CLEANUP_URL` | variable, optional | cleanup endpoint (default `https://www.roarz.net/_deploy/wind-cleanup.php`) |
 
 The workflow never runs for pull requests, so forks never see the secrets. GitHub disables scheduled workflows of
 public repositories after 60 days without activity; the workflow re-enables itself on every scheduled run.

@@ -41,6 +41,18 @@ fi
 ! grep -qE '^(put|mv) ' "$tmp/out" || fail 'latest.json touched after an incomplete upload'
 ! grep -q 'rm -r' "$tmp/out" || fail 'cleanup after an incomplete upload'
 
+# Cleanup on the server (endpoint configured): no FTP deletion after the switch; if the call fails, FTP takes over.
+export WIND_CLEANUP_URL=https://example.test/_deploy/wind-cleanup.php WIND_CLEANUP_TOKEN=secret
+DRY_RUN_CLEANUP=ok DRY_RUN_REMOTE_LIST=$tmp/remote.full DRY_RUN_REMOTE_DIRS=$tmp/remote.dirs "$script" publish "$build" > "$tmp/out" 2>&1 \
+  || fail "upload with server cleanup failed: $(cat "$tmp/out")"
+[ "$(line 'mv "public/wind/latest.json.tmp" "public/wind/latest.json"')" -lt "$(line '^POST https://example.test/')" ] || fail 'server cleanup before switch'
+! grep -q 'rm -r' "$tmp/out" || fail 'FTP deletion despite server cleanup'
+! grep -q 'secret' "$tmp/out" || fail 'token in the output'
+DRY_RUN_CLEANUP=fail DRY_RUN_REMOTE_LIST=$tmp/remote.full DRY_RUN_REMOTE_DIRS=$tmp/remote.dirs "$script" publish "$build" > "$tmp/out" 2>&1 \
+  || fail "upload with failing server cleanup failed: $(cat "$tmp/out")"
+grep -q 'rm -r -f "public/wind/2026101206"' "$tmp/out" || fail 'no FTP fallback after a failed server cleanup'
+unset WIND_CLEANUP_URL WIND_CLEANUP_TOKEN
+
 # Invalid run name in latest.json: nothing happens.
 echo '{"run": "../x"}' > "$build/latest.json"
 if "$script" publish "$build" > "$tmp/out" 2>&1; then fail 'invalid run accepted'; fi
