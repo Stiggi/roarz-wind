@@ -1,21 +1,22 @@
-# Wind data for the roarz map layer: DWD ICON-EU → PNG textures → https://wind.roarz.net/ (own subdomain and folder
-# on the webspace, own FTP account).
+# Wind data for the roarz map layer: DWD ICON-EU → PNG textures → public/wind/ of the roarz live webspace.
 #
-# Runs ONCE for both app environments: www.roarz.net and dev.roarz.net read the same data (CORS). This repository is
-# public, so GitHub-hosted runners cost no Actions minutes; the app itself lives in a private repository.
+# Runs ONCE for both app environments: www.roarz.net reads wind/ on its own server, dev.roarz.net reads
+# https://www.roarz.net/wind/ (CORS). This repository is public, so GitHub-hosted runners cost no Actions minutes; the
+# app itself lives in a private repository.
 #
 # Steps: fetch the published latest.json → pipeline/icon_wind.py picks the newest COMPLETE run (all variables,
-# steps 0–48) and only builds it if it is newer → .github/scripts/ftp-wind.sh uploads web/.htaccess and the run
-# folder, verifies it, switches latest.json last and deletes all but the last two runs. Any failure leaves the published data as
+# steps 0–48) and only builds it if it is newer → .github/scripts/ftp-wind.sh uploads the run folder, verifies
+# it, switches latest.json last and deletes all but the last two runs. Any failure leaves the published data as
 # it is (the job fails loudly).
 #
 # Only schedule and workflow_dispatch – never pull_request: the job holds the FTP secrets.
 #
 # Environment "live" (restricted to the branch main):
-#   Secrets    FTP_HOST, FTP_USER, FTP_PASSWORD – the FTP account of the subdomain (it reaches only its folder).
-#   Variables  optional, only if the account does not start in the web folder of wind.roarz.net:
+#   Secrets    FTP_HOST, FTP_USER, FTP_PASSWORD – an FTP account that reaches only public/wind/ (at webgo bound to the
+#              subdomain wind.roarz.net, which points to that folder; the app does not use the subdomain).
+#   Variables  optional, only if the account does not start in the wind folder:
 #              FTP_PATH  folder the FTP account starts in (default "/")
-#              WIND_DIR  web folder of wind.roarz.net relative to FTP_PATH (default ".")
+#              WIND_DIR  wind folder relative to FTP_PATH (default ".")
 # First run: Actions → "Wind data" → "Run workflow" (branch main).
 
 name: Wind data

@@ -7,9 +7,10 @@
 ## Zweck
 
 Winddaten (DWD ICON-EU) für die Windebene der App roarz (eigenes, privates Repository `Stiggi/roarz`). Dieses Repo ist
-**öffentlich**, damit die GitHub-Runner keine Actions-Minuten kosten. Die Daten liegen auf der Subdomain
-`https://wind.roarz.net/` (eigener Ordner, eigener FTP-Zugang, der nur diesen Ordner erreicht); www.roarz.net und
-dev.roarz.net lesen sie per CORS.
+**öffentlich**, damit die GitHub-Runner keine Actions-Minuten kosten. Die Daten liegen in `public/wind/` des
+Live-Webspace; www.roarz.net liest `wind/`, dev.roarz.net `https://www.roarz.net/wind/` per CORS. Hochgeladen wird mit
+einem eigenen FTP-Zugang, der nur diesen Ordner erreicht (bei Webgo an die Subdomain `wind.roarz.net` gebunden, die
+dorthin zeigt; die App nutzt die Subdomain nicht).
 
 ## Sicherheit (öffentliches Repo)
 
@@ -29,13 +30,13 @@ dev.roarz.net lesen sie per CORS.
 ## Pipeline
 
 - `.github/workflows/wind.yml` (Cron stündlich + manuell; ohne neueren Lauf endet der Job nach `latest.json`) lädt in
-  den Webordner von wind.roarz.net (`<FTP_PATH>/<WIND_DIR>/`, Standard `/` und `.`). Ein Keep-alive-Schritt
+  den Windordner (`<FTP_PATH>/<WIND_DIR>/`, Standard `/` und `.`). Ein Keep-alive-Schritt
   verhindert, dass GitHub den Cron nach 60 Tagen ohne Aktivität abschaltet.
 - `pipeline/icon_wind.py` verarbeitet nur einen Lauf, dessen Dateien für **alle** Variablen und Schritte 000–048
   vorhanden sind, und nur wenn er neuer ist als der veröffentlichte. Fehler → Abbruch vor `latest.json`.
-- `.github/scripts/ftp-wind.sh`: `web/.htaccess` (CORS, Cache-Header) und Laufordner hochladen → Vollständigkeit
-  prüfen → `latest.json` zuletzt umschalten → alle Läufe außer dem neuen und dem vorherigen löschen.
-  Verbindung/Settings in `ftp-common.sh` (Kopie aus roarz).
+- `.github/scripts/ftp-wind.sh`: Laufordner hochladen → Vollständigkeit prüfen → `latest.json` zuletzt umschalten →
+  alle Läufe außer dem neuen und dem vorherigen löschen. Die `.htaccess` des Ordners (CORS, Cache-Header) gehört der
+  App und wird nie angefasst. Verbindung/Settings in `ftp-common.sh` (Kopie aus roarz).
 - Kodierung (Wertebereiche, Kacheln, `meta.json`) siehe Kopf von `pipeline/icon_wind.py` und README. Die App dekodiert
   sie in `public/js/wind/grid.js` (roarz) – Formatänderungen nur abgestimmt mit der App und rückwärtskompatibel
   (`meta.json` trägt die Wertebereiche).
