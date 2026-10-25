@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# Publishes the wind data built by pipeline/icon_wind.py on https://wind.roarz.net/ (called by .github/workflows/wind.yml).
-# FTPS connection as in the roarz app deployment (ftp-common.sh), with the FTP account of the subdomain.
+# Publishes the wind data built by pipeline/icon_wind.py in public/wind/ of the roarz live webspace (called by
+# .github/workflows/wind.yml). FTPS connection as in the roarz app deployment (ftp-common.sh), with an FTP account that
+# reaches only that folder (the subdomain wind.roarz.net points there for it).
 #
 #   ftp-wind.sh fetch <file>     download the published latest.json to <file> (no file if there is none yet)
 #   ftp-wind.sh publish <dir>    upload <dir>/<run>/ and switch <dir>/latest.json to it
 #
 # publish, in this order – a run that fails anywhere leaves the published data untouched:
-#   1. upload web/.htaccess (CORS, cache headers) and mirror <dir>/<run>/ to <WIND_DIR>/<run>/ (a new folder: no
-#      client reads it yet)
+#   1. mirror <dir>/<run>/ to <WIND_DIR>/<run>/ (a new folder: no client reads it yet)
 #   2. compare the remote file list of that folder with the local one – any difference aborts
 #   3. upload latest.json as latest.json.tmp and rename it to latest.json (the switch)
 #   4. delete run folders other than the new run and the previous one (still used by open apps)
 #
-# Env: FTP_HOST, FTP_USER, FTP_PASSWORD, FTP_PATH (see ftp-common.sh); WIND_DIR (web folder of wind.roarz.net
-# relative to FTP_PATH, default "." = the FTP account's root is that folder); HTACCESS (default web/.htaccess). Testing: DRY_RUN=1 prints the lftp commands;
+# Env: FTP_HOST, FTP_USER, FTP_PASSWORD, FTP_PATH (see ftp-common.sh); WIND_DIR (the wind folder relative to FTP_PATH,
+# default "." = the FTP account's root is that folder). The folder's .htaccess (CORS, cache headers) belongs to the
+# app repository and is deployed from there; this script never touches it. Testing: DRY_RUN=1 prints the lftp commands;
 # DRY_RUN_REMOTE_LIST=<file> fakes the remote listing of step 2, DRY_RUN_REMOTE_DIRS=<file> the run folders for step 4.
 set -euo pipefail
 
 . "$(dirname "$0")/ftp-common.sh"
 
 WIND_DIR=${WIND_DIR:-.}
-HTACCESS=${HTACCESS:-$(dirname "$0")/../../web/.htaccess}
 PARALLEL=${PARALLEL:-8}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -59,7 +59,6 @@ publish)
   [[ "$run" =~ ^[0-9]{10}$ ]] || { echo "::error::invalid run in latest.json: $run" >&2; exit 1; }
   [ -z "$previous" ] || [[ "$previous" =~ ^[0-9]{10}$ ]] || { echo "::error::invalid previous run: $previous" >&2; exit 1; }
   [ -f "$dir/$run/meta.json" ] || { echo "::error::$dir/$run/meta.json missing" >&2; exit 1; }
-  [ -f "$HTACCESS" ] || { echo "::error::$HTACCESS missing" >&2; exit 1; }
 
   (cd "$dir/$run" && find . -type f -printf '%P\n' | LC_ALL=C sort) > "$work/local.list"
   count=$(wc -l < "$work/local.list")
@@ -67,11 +66,10 @@ publish)
   echo "Uploading run $run: $count files, $((bytes / 1000000)) MB → $WIND_DIR/$run/"
   start=$(date +%s)
 
-  # 1. Upload the .htaccess and the run folder.
+  # 1. Upload the run folder.
   {
     settings
     [ "$WIND_DIR" = . ] || echo "mkdir -p -f \"$WIND_DIR\""
-    echo "put \"$HTACCESS\" -o \"$WIND_DIR/.htaccess\""
     echo "mirror -R --parallel=$PARALLEL --no-perms --no-umask \"$dir/$run\" \"$WIND_DIR/$run\""
   } > "$work/upload.lftp"
   lftp_run "$work/upload.lftp"

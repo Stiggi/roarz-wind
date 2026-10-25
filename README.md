@@ -1,9 +1,9 @@
 # roarz-wind
 
 Wind and weather data for the map layer of [roarz.net](https://roarz.net): the 10 m wind of the DWD model ICON-EU
-(Europe, about 7 km grid) as PNG textures, published on **https://wind.roarz.net/** (own subdomain and folder on the
-webspace, own FTP account). The app (a separate, private repository) reads them from there, on www.roarz.net and
-dev.roarz.net alike; the browser never talks to the DWD.
+(Europe, about 7 km grid) as PNG textures, uploaded to `public/wind/` of the roarz live webspace. The app (a separate,
+private repository) reads them from `https://www.roarz.net/wind/` (dev.roarz.net too, via CORS); the browser never
+talks to the DWD.
 
 ## Pipeline
 
@@ -22,9 +22,9 @@ FTP secrets of the environment `live`:
      points per tile; tiles without land (DWD land fraction) are left out. Decode them without premultiplied alpha.
    - `<run>/meta.json` (run, steps with valid times, grid, value ranges, tile index, attribution) and, last,
      `latest.json`.
-3. `.github/scripts/ftp-wind.sh publish` uploads `web/.htaccess` (CORS for the app, cache headers: JSON 5 min, PNG
-   1 year, immutable) and the run folder (lftp mirror, 8 parallel connections), checks that every file arrived, then
-   switches `latest.json` and deletes all run folders but the new and the previous one.
+3. `.github/scripts/ftp-wind.sh publish` uploads the run folder (lftp mirror, 8 parallel connections), checks that
+   every file arrived, then switches `latest.json` and deletes all run folders but the new and the previous one. The
+   folder's `.htaccess` (CORS, cache headers) is deployed by the app and never touched here.
 
 Any error (missing file, decoding, upload) fails the job and leaves the published data untouched. Per run: about
 6,000 files and 110 MB; on the server at most three runs at a time. The job summary logs the volume, file count and
@@ -37,11 +37,9 @@ Environment `live` (Settings → Environments), deployment branches: `main` only
 
 | Name | Kind | Value |
 | --- | --- | --- |
-| `FTP_HOST`, `FTP_USER`, `FTP_PASSWORD` | secrets | FTP account of the subdomain wind.roarz.net (reaches only its folder) |
+| `FTP_HOST`, `FTP_USER`, `FTP_PASSWORD` | secrets | FTP account that reaches only `public/wind/` (at webgo bound to the subdomain wind.roarz.net, which points there) |
 | `FTP_PATH` | variable, optional | folder the account starts in (default `/`) |
-| `WIND_DIR` | variable, optional | web folder of wind.roarz.net relative to `FTP_PATH` (default `.`) |
-
-The subdomain needs HTTPS (Let's Encrypt) – the app only loads `https://wind.roarz.net/`.
+| `WIND_DIR` | variable, optional | wind folder relative to `FTP_PATH` (default `.`) |
 
 The workflow never runs for pull requests, so forks never see the secrets. GitHub disables scheduled workflows of
 public repositories after 60 days without activity; the workflow re-enables itself on every scheduled run.
