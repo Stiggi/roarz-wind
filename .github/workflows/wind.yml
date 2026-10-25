@@ -14,9 +14,12 @@
 # Environment "live" (restricted to the branch main):
 #   Secrets    FTP_HOST, FTP_USER, FTP_PASSWORD – an FTP account that reaches only public/wind/ (at webgo bound to the
 #              subdomain wind.roarz.net, which points to that folder; the app does not use the subdomain).
-#   Variables  optional, only if the account does not start in the wind folder:
+#              WIND_CLEANUP_TOKEN – same value as in the roarz environment "live": the app deletes old run folders on
+#              the server (without it, or if that fails, they are deleted over FTP, ~13 min per run).
+#   Variables  optional:
 #              FTP_PATH  folder the FTP account starts in (default "/")
 #              WIND_DIR  wind folder relative to FTP_PATH (default ".")
+#              WIND_CLEANUP_URL  cleanup endpoint (default https://www.roarz.net/_deploy/wind-cleanup.php)
 # First run: Actions → "Wind data" → "Run workflow" (branch main).
 
 name: Wind data
@@ -90,4 +93,8 @@ jobs:
 
       - name: Hochladen und umschalten
         if: steps.build.outputs.run != ''
+        env:
+          # Old run folders are deleted on the server by the app (seconds instead of ~13 min over FTP).
+          WIND_CLEANUP_URL: ${{ vars.WIND_CLEANUP_URL || 'https://www.roarz.net/_deploy/wind-cleanup.php' }}
+          WIND_CLEANUP_TOKEN: ${{ secrets.WIND_CLEANUP_TOKEN }}
         run: .github/scripts/ftp-wind.sh publish build/wind
