@@ -6,8 +6,8 @@
 
 ## Zweck
 
-Winddaten (DWD ICON-EU) für die Windebene der App roarz (eigenes, privates Repository `Stiggi/roarz`). Dieses Repo ist
-**öffentlich**, damit die GitHub-Runner keine Actions-Minuten kosten. Die Daten liegen in `public/wind/` des
+Winddaten (DWD ICON-EU, am Rand ICON global) für die Windebene der App roarz (eigenes, privates Repository
+`Stiggi/roarz`). Dieses Repo ist **öffentlich**, damit die GitHub-Runner keine Actions-Minuten kosten. Die Daten liegen in `public/wind/` des
 Live-Webspace; www.roarz.net liest `wind/`, dev.roarz.net `https://www.roarz.net/wind/` per CORS. Hochgeladen wird mit
 einem eigenen FTP-Zugang, der nur diesen Ordner erreicht (bei Webgo an die Subdomain `wind.roarz.net` gebunden, die
 dorthin zeigt; die App nutzt die Subdomain nicht).
@@ -34,6 +34,10 @@ dorthin zeigt; die App nutzt die Subdomain nicht).
   verhindert, dass GitHub den Cron nach 60 Tagen ohne Aktivität abschaltet.
 - `pipeline/icon_wind.py` verarbeitet nur einen Lauf, dessen Dateien für **alle** Variablen und Schritte 000–048
   vorhanden sind, und nur wenn er neuer ist als der veröffentlichte. Fehler → Abbruch vor `latest.json`.
+- Gebiet `AREA` (lon −30…62,5, lat 29,5…75, ganz Island und Nordkap): ICON-EU auf seinen eigenen Punkten, außerhalb
+  ICON global (Dreiecksgitter, IDW der 4 nächsten Zellen), über `BLEND` Punkte am West-/Nordrand von ICON-EU
+  übergeblendet. ICON global: derselbe oder ein früherer vollständiger Lauf (Schritte verschoben); fehlt er, wird nur
+  das ICON-EU-Gebiet veröffentlicht (Warnung im Job). Die App liest die Grenzen aus `meta.json` (`grid`).
 - `.github/scripts/ftp-wind.sh`: Laufordner hochladen → Vollständigkeit prüfen → `latest.json` zuletzt umschalten →
   alle Läufe außer dem neuen und dem vorherigen löschen. Die `.htaccess` des Ordners (CORS, Cache-Header) gehört der
   App und wird nie angefasst. Verbindung/Settings in `ftp-common.sh` (Kopie aus roarz).

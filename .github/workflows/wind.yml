@@ -1,4 +1,5 @@
-# Wind data for the roarz map layer: DWD ICON-EU → PNG textures → public/wind/ of the roarz live webspace.
+# Wind data for the roarz map layer: DWD ICON-EU, edged with ICON global → PNG textures → public/wind/ of the roarz
+# live webspace.
 #
 # Runs ONCE for both app environments: www.roarz.net reads wind/ on its own server, dev.roarz.net reads
 # https://www.roarz.net/wind/ (CORS). This repository is public, so GitHub-hosted runners cost no Actions minutes; the
@@ -79,7 +80,7 @@ jobs:
       - name: Veröffentlichten Stand holen
         run: .github/scripts/ftp-wind.sh fetch build/published-latest.json
 
-      - name: ICON-EU laden und kodieren
+      - name: ICON-EU und ICON global laden und kodieren
         id: build
         env:
           RUN: ${{ inputs.run }}

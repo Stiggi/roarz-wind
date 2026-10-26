@@ -232,6 +232,141 @@ class Build(unittest.TestCase):
             self.assertAlmostEqual(iw.decode(w2[0, 0, 3], 950, 1050), 1013.0, delta=0.5)
 
 
+# ---------------------------------------------------------------------------------------------- ICON global edge
+
+GLOBAL_RUN = (RUN, 0)
+AREA = iw.Grid(west=-10.0, north=20.0, dlon=0.5, dlat=0.5, width=320, height=220)  # GRID from x0 = y0 = 20
+LAT, LON = (a.ravel() for a in np.meshgrid(np.arange(-90.0, 90.1, 1.0), np.arange(-180.0, 180.0, 1.0), indexing='ij'))
+
+
+def global_fetch(url: str) -> bytes:
+    m = re.search(r'icon_global_icosahedral_time-invariant_(\d{10})_(\w+)\.grib2\.bz2$', url)
+    if m:
+        return json.dumps({'global': True, 'run': m[1], 'const': m[2]}).encode()
+    m = re.search(r'icon_global_icosahedral_single-level_(\d{10})_(\d{3})_(\w+)\.grib2\.bz2$', url)
+    if m:
+        return json.dumps({'global': True, 'run': m[1], 'step': int(m[2]), 'var': m[3]}).encode()
+    return fake_fetch(url)
+
+
+def global_decoder(blob: bytes) -> iw.Field:
+    """ICON-EU as fake_decoder; ICON global on a 1° lattice: u = 5, v = 2, gust = 9, t = 5 °C, 1 mm per hour, …"""
+    d = json.loads(blob)
+    if not d.get('global'):
+        return fake_decoder()(blob)
+    if 'const' in d:
+        values = {'CLAT': LAT, 'CLON': LON, 'FR_LAND': (LAT > 15).astype(float)}[d['const']]
+        return iw.Field(values, None, d['run'], 0)
+    var, step = d['var'].lower(), d['step']
+    if var == 'vmax_10m' and step == 0:
+        raise AssertionError('ICON global has no gust at step 0')
+    value = {'u_10m': 5.0, 'v_10m': 2.0, 'vmax_10m': 9.0, 't_2m': 278.15, 'tot_prec': 1.0 * step, 'clct': 80.0, 'pmsl': 100000.0}[var]
+    return iw.Field(np.full(LAT.shape, value), None, d['run'], step)
+
+
+class GlobalEdge(unittest.TestCase):
+    def test_area_holds_icon_eu_on_its_points(self):
+        eu = iw.Grid(-23.5, 70.5, 0.0625, 0.0625, 1377, 657)
+        self.assertEqual((iw.AREA.east, iw.AREA.south), (62.5, 29.5))
+        self.assertLessEqual(iw.AREA.west, -24.6, 'all of Iceland')
+        self.assertGreaterEqual(iw.AREA.north, 71.2, 'North Cape')
+        self.assertEqual(((eu.west - iw.AREA.west) / 0.0625, (iw.AREA.north - eu.north) / 0.0625), (104.0, 72.0))
+
+    def test_eu_weights_fade_only_towards_the_ring(self):
+        area = iw.Grid(0, 10, 1, 1, 12, 10)
+        w = iw.eu_weights(area, 2, 3, 10, 7, 4)  # ICON-EU reaches the area's east and south edge
+        self.assertEqual(w[:3].max(), 0)
+        self.assertEqual(w[:, :2].max(), 0)
+        np.testing.assert_allclose(w[9, 2:7], [0, 0.25, 0.5, 0.75, 1])  # from the west edge inwards
+        np.testing.assert_allclose(w[3:8, 11], [0, 0.25, 0.5, 0.75, 1])  # from the north edge downwards
+        self.assertEqual(w[9, 11], 1, 'no fading at the area edge')
+
+    def test_composite_interpolates_and_blends(self):
+        comp = iw.composite(AREA, GRID, LAT, LON, blend=4)
+        self.assertEqual((comp.x0, comp.y0), (20, 20))
+        ring = comp.interpolate(np.full(LAT.shape, 5.0))
+        np.testing.assert_allclose(ring, 5.0)
+        lon_field = comp.interpolate(LON)  # smooth field: the interpolation follows it
+        ty, tx = np.divmod(comp.targets, AREA.width)
+        mid = np.abs(AREA.north - ty * AREA.dlat) < 60  # away from the poles, where the longitude is degenerate
+        self.assertLess(np.abs(lon_field - (AREA.west + tx * AREA.dlon))[mid].max(), 0.6)
+        out = comp.compose(np.full((GRID.height, GRID.width), 3.0), ring)
+        self.assertEqual(out.shape, (AREA.height, AREA.width))
+        self.assertAlmostEqual(out[0, 0], 5.0)
+        np.testing.assert_allclose(out[100, 18:26], [5, 5, 5, 4.5, 4, 3.5, 3, 3])
+        self.assertEqual(out[219, 319], 3.0)
+
+    def test_misaligned_icon_eu_is_rejected(self):
+        with self.assertRaisesRegex(iw.PipelineError, 'does not lie'):
+            iw.composite(AREA, iw.Grid(0.25, 10.0, 0.5, 0.5, 300, 200), LAT, LON)
+        with self.assertRaisesRegex(iw.PipelineError, 'does not lie'):
+            iw.composite(AREA, iw.Grid(0.0, 10.0, 0.5, 0.5, 400, 200), LAT, LON)
+
+    def test_global_candidates_and_files(self):
+        runs = iw.global_candidates(datetime(2026, 10, 12, 9, tzinfo=timezone.utc))
+        self.assertEqual([(iw.run_name(g), o) for g, o in runs], [('2026101206', 3), ('2026101200', 9), ('2026101118', 15)])
+        files = iw.global_files(RUN, 0, 3)
+        self.assertEqual(files['vmax_10m'], [iw.GLOBAL_TEMPLATE.format(run=NAME, step=s, var='VMAX_10M') for s in (1, 2, 3)])
+        self.assertEqual(len(files['u_10m']), 4)
+        self.assertEqual(files['clat'], [f'icon_global_icosahedral_time-invariant_{NAME}_CLAT.grib2.bz2'])
+
+    def test_select_global_takes_the_newest_complete_run(self):
+        r06 = datetime(2026, 10, 12, 6, tzinfo=timezone.utc)
+        r00 = datetime(2026, 10, 12, 0, tzinfo=timezone.utc)
+        full = {r06: iw.global_files(r06, 0, 4), r00: iw.global_files(r00, 6, 4)}
+
+        def listing(without: set[datetime]):
+            def names(url: str) -> set[str]:
+                hh, directory = re.search(r'/(\d\d)/(\w+)/$', url).groups()
+                return {f for run, files in full.items() if run not in without and f'{run.hour:02d}' == hh for f in files.get(directory, [])}
+
+            return names
+
+        self.assertEqual(iw.select_global(r06, listing(set()), 4), (r06, 0))
+        self.assertEqual(iw.select_global(r06, listing({r06}), 4), (r00, 6))
+        self.assertIsNone(iw.select_global(r06, listing({r06, r00}), 4))
+
+    def test_build_with_edge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            iw.build_run(RUN, out, global_run=GLOBAL_RUN, area=AREA, blend=4, fetch=global_fetch, decoder=global_decoder, max_step=3, workers=2)
+            meta = json.loads((out / NAME / 'meta.json').read_text())
+            self.assertEqual(meta['grid'], {**meta['grid'], 'width': 320, 'height': 220, 'west': -10.0, 'north': 20.0})
+            self.assertEqual((meta['map']['width'], meta['map']['height']), (160, 110))
+            self.assertEqual(meta['model'], 'ICON-EU + ICON')
+            self.assertIn('ICON-EU und ICON', meta['attribution']['de'])
+            self.assertEqual(meta['sources']['ICON'], {**meta['sources']['ICON'], 'run': NAME, 'stepOffset': 0, 'blend': 4})
+            self.assertEqual(meta['sources']['ICON-EU']['west'], 0.0)
+            # land: ICON-EU tiles moved by (20, 20) points, plus the ICON global land north of 15° N (rows 0…9)
+            self.assertIn('0_0', meta['tiles']['index'])
+            self.assertEqual(meta['tiles']['index']['0_0']['north'], 20.0)
+
+            r = meta['encoding']['ranges']
+            m = np.asarray(Image.open(out / NAME / 'map' / 'step_002.png'))
+            self.assertEqual(m.shape, (110, 160, 3))
+            u = lambda y, x: iw.decode(m[y, x, 0], r['u']['min'], r['u']['max'])  # noqa: E731
+            self.assertAlmostEqual(u(2, 2), 5.0, delta=0.3, msg='ring: ICON global')
+            self.assertAlmostEqual(u(60, 60), 3.0, delta=0.3, msg='inside: ICON-EU')
+            self.assertAlmostEqual(u(60, 11), 4.0, delta=0.3, msg='half way into the fade (point 22 of the area)')
+
+            g0 = np.asarray(Image.open(out / NAME / 'tiles' / '0_0' / 'wind_000.png'))
+            self.assertAlmostEqual(iw.decode(g0[0, 0, 2], 0, 40), 9.0, delta=0.3, msg='gust of step 1 at step 0')
+            w2 = np.asarray(Image.open(out / NAME / 'tiles' / '0_0' / 'weather_002.png'))
+            self.assertAlmostEqual(iw.decode(w2[0, 0, 0], -40, 45), 5.0, delta=0.5)
+            self.assertAlmostEqual(iw.decode(w2[0, 0, 1], 0, 20), 1.0, delta=0.1, msg='ICON global mm/h, not accumulated')
+            self.assertAlmostEqual(iw.decode(w2[0, 0, 3], 950, 1050), 1000.0, delta=0.5)
+
+    def test_global_file_of_another_run_is_rejected(self):
+        def fetch(url):
+            return global_fetch(url.replace(f'icosahedral_single-level_{NAME}_002', 'icosahedral_single-level_2026101118_002'))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            with self.assertRaisesRegex(iw.PipelineError, 'ICON .* file contains run 2026101118'):
+                iw.build_run(RUN, out, global_run=GLOBAL_RUN, area=AREA, blend=4, fetch=fetch, decoder=global_decoder, max_step=3, workers=2)
+            self.assertEqual(list(out.iterdir()), [])
+
+
 class TileLookup(unittest.TestCase):
     META = {
         'grid': {'west': -23.5, 'north': 70.5, 'dlon': 0.0625, 'dlat': 0.0625, 'width': 1377, 'height': 657},
